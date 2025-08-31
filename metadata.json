@@ -1,0 +1,5 @@
+{
+  "name": "AI PICTURE AUTO",
+  "description": "An efficient web tool for content creators and marketers to automate the generation of illustrative images from a list of prompts (via CSV file), optimized for social media use.",
+  "requestFramePermissions": []
+}
