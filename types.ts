@@ -1,4 +1,3 @@
-
 export enum AspectRatio {
   SQUARE = '1:1',
   PORTRAIT = '9:16',
@@ -18,4 +17,11 @@ export interface ImageResult {
   imageUrl: string | null;
   status: GenerationStatus;
   error?: string;
+}
+
+export type Provider = 'google' | 'openai';
+
+export interface ApiKeys {
+  google: string[];
+  openai: string[];
 }
