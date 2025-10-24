@@ -45,6 +45,9 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
     const [activeKeyIndices, setActiveKeyIndices] = useState({ google: 0, openai: 0 });
     const [isManualKeySelection, setIsManualKeySelection] = useState(false);
 
+    const [inputMode, setInputMode] = useState<'csv' | 'text'>('csv');
+    const [textInput, setTextInput] = useState('');
+
     const googleInstances = useMemo(() => apiKeys.google.map(key => new GoogleGenAI({ apiKey: key })), [apiKeys.google]);
     const googleKeyIndex = useRef(0);
     const openaiKeyIndex = useRef(0);
@@ -63,10 +66,12 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (file) {
+            setTextInput('');
             setFileName(file.name);
             setResults([]);
             setPrompts([]);
             Papa.parse(file, {
+                skipEmptyLines: true,
                 complete: (result: any) => {
                     const parsedPrompts: CsvRow[] = result.data
                         .map((row: any) => ({ id: row[0]?.trim(), prompt: row[1]?.trim() }))
@@ -86,6 +91,35 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
                 }
             });
         }
+    };
+
+    const handleTextInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const text = event.target.value;
+        setTextInput(text);
+        setFileName('');
+        setResults([]);
+    
+        Papa.parse(text, {
+            skipEmptyLines: true,
+            complete: (result: any) => {
+                const parsedPrompts: CsvRow[] = result.data
+                    .map((row: any) => ({ id: row[0]?.toString().trim(), prompt: row[1]?.toString().trim() }))
+                    .filter((p: CsvRow) => p.id && p.prompt && !isNaN(parseInt(p.id, 10)));
+                
+                setPrompts(parsedPrompts);
+                
+                if (parsedPrompts.length > 0) {
+                    setStartId(parsedPrompts[0].id);
+                    setEndId(parsedPrompts[parsedPrompts.length - 1].id);
+                } else {
+                    setStartId('');
+                    setEndId('');
+                }
+            },
+            error: (error: Error) => {
+                console.error(`Error parsing text input: ${error.message}`);
+            }
+        });
     };
     
     const generateSingleImage = useCallback(async (
@@ -194,7 +228,7 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
     }, [selectedModel, apiKeys, aspectRatio, isManualKeySelection, activeKeyIndices, googleInstances]);
 
     const handleStartGeneration = async () => {
-        if (prompts.length === 0) return alert("Please upload a valid CSV file first.");
+        if (prompts.length === 0) return alert("Please upload a valid CSV file or paste data first.");
         if (activeKeys.length === 0) return alert(`Please add at least one API key for ${activeProvider}.`);
         
         let promptsToGenerate = [...prompts];
@@ -370,11 +404,45 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
                         </div>
                         <div className="flex flex-col gap-3">
                             <h3 className="font-semibold text-lg text-white">3. Upload Prompts</h3>
-                            <label htmlFor="csv-upload" className={`flex items-center justify-center gap-2 w-full px-4 py-2 rounded-lg transition-colors ${isGenerating ? 'bg-gray-600 text-gray-400 cursor-not-allowed' : 'bg-gray-700 hover:bg-gray-600 text-gray-300 cursor-pointer'}`}>
-                                <UploadIcon className="w-5 h-5" />
-                                <span>{fileName || 'Upload CSV File'}</span>
-                            </label>
-                            <input id="csv-upload" type="file" accept=".csv" className="hidden" onChange={handleFileChange} disabled={isGenerating} />
+                            <div className="flex border-b border-gray-700">
+                                <button 
+                                    onClick={() => setInputMode('csv')} 
+                                    disabled={isGenerating}
+                                    className={`px-4 py-2 text-sm font-medium transition-colors ${inputMode === 'csv' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400 hover:text-white'} disabled:cursor-not-allowed`}
+                                >
+                                    Upload CSV
+                                </button>
+                                <button 
+                                    onClick={() => setInputMode('text')} 
+                                    disabled={isGenerating}
+                                    className={`px-4 py-2 text-sm font-medium transition-colors ${inputMode === 'text' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400 hover:text-white'} disabled:cursor-not-allowed`}
+                                >
+                                    Paste Text
+                                </button>
+                            </div>
+
+                            {inputMode === 'csv' && (
+                                <div className="pt-2">
+                                    <label htmlFor="csv-upload" className={`flex items-center justify-center gap-2 w-full px-4 py-2 rounded-lg transition-colors ${isGenerating ? 'bg-gray-600 text-gray-400 cursor-not-allowed' : 'bg-gray-700 hover:bg-gray-600 text-gray-300 cursor-pointer'}`}>
+                                        <UploadIcon className="w-5 h-5" />
+                                        <span>{fileName || 'Upload CSV File'}</span>
+                                    </label>
+                                    <input id="csv-upload" type="file" accept=".csv" className="hidden" onChange={handleFileChange} disabled={isGenerating} />
+                                </div>
+                            )}
+                            
+                            {inputMode === 'text' && (
+                                <div className="pt-2">
+                                    <textarea
+                                        value={textInput}
+                                        onChange={handleTextInputChange}
+                                        disabled={isGenerating}
+                                        rows={5}
+                                        className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-200 resize-y font-mono"
+                                        placeholder="Paste your data here, one per line, e.g.,&#10;1,A photo of a cat&#10;2,A drawing of a dog"
+                                    />
+                                </div>
+                            )}
                         </div>
                         
                         <div className="flex flex-col gap-3 md:col-span-3">
