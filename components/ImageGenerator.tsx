@@ -101,10 +101,16 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
     
         Papa.parse(text, {
             skipEmptyLines: true,
-            complete: (result: any) => {
+            complete: (result: { data: string[][] }) => {
                 const parsedPrompts: CsvRow[] = result.data
-                    .map((row: any) => ({ id: row[0]?.toString().trim(), prompt: row[1]?.toString().trim() }))
-                    .filter((p: CsvRow) => p.id && p.prompt && !isNaN(parseInt(p.id, 10)));
+                    .map((row: string[]) => {
+                        if (!row || row.length < 2) return null;
+                        const id = row[0]?.trim();
+                        // Join all subsequent columns to form the full prompt, handling commas in prompts
+                        const prompt = row.slice(1).join(',').trim();
+                        return { id, prompt };
+                    })
+                    .filter((p): p is CsvRow => !!p && !!p.id && !!p.prompt && !isNaN(parseInt(p.id, 10)));
                 
                 setPrompts(parsedPrompts);
                 
@@ -149,7 +155,7 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
                     return `OpenAI Error: ${error.error.message}`;
                 }
             }
-            return 'An unknown error occurred';
+            return error.message || 'An unknown error occurred';
         };
 
         const keyIndexRef = currentProvider === 'google' ? googleKeyIndex : openaiKeyIndex;
@@ -213,10 +219,11 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
                 const data = await response.json();
                 if (!response.ok) throw data;
                 
-                if (!data.data || data.data.length === 0 || !data.data[0].b64_json) {
+                const b64Json = data.data?.[0]?.b64_json;
+                if (!b64Json) {
                     throw new Error('Generation failed: No image data returned from OpenAI API.');
                 }
-                imageUrl = `data:image/png;base64,${data.data[0].b64_json}`;
+                imageUrl = `data:image/png;base64,${b64Json}`;
             }
             
             if (!isManualKeySelection) {
