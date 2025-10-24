@@ -177,7 +177,19 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
                     prompt: resultToGenerate.prompt,
                     config: { numberOfImages: 1, outputMimeType: 'image/jpeg', aspectRatio },
                 });
-                const base64ImageBytes = response.generatedImages[0].image.imageBytes;
+                
+                const firstResult = response.generatedImages?.[0];
+
+                if (!firstResult?.image?.imageBytes) {
+                    let errorMessage = 'Generation failed: No image returned from API. This may be due to safety filters.';
+                     if (firstResult?.safetyFeedback) {
+                        const reasons = firstResult.safetyFeedback.reasons?.map(r => r.reason).join(', ');
+                        errorMessage = `Image blocked by safety filters.${reasons ? ` Reasons: ${reasons}` : ''}`;
+                    }
+                    throw new Error(errorMessage);
+                }
+                
+                const base64ImageBytes = firstResult.image.imageBytes;
                 imageUrl = `data:image/jpeg;base64,${base64ImageBytes}`;
             } else { // OpenAI
                 const apiKey = keysForProvider[keyIndexToTry];
@@ -200,6 +212,10 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
 
                 const data = await response.json();
                 if (!response.ok) throw data;
+                
+                if (!data.data || data.data.length === 0 || !data.data[0].b64_json) {
+                    throw new Error('Generation failed: No image data returned from OpenAI API.');
+                }
                 imageUrl = `data:image/png;base64,${data.data[0].b64_json}`;
             }
             
