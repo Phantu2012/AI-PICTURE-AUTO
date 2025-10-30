@@ -1,9 +1,9 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from '@google/genai';
 import Papa from 'papaparse';
 import JSZip from 'jszip';
 import { AspectRatio, CsvRow, ImageResult, ApiKeys, Provider } from '../types';
-import { UploadIcon, GenerateIcon, DownloadIcon, KeyIcon, TuneIcon, ClockIcon } from './icons';
+import { UploadIcon, GenerateIcon, DownloadIcon, KeyIcon, TuneIcon, ClockIcon, ShieldIcon } from './icons';
 import ImageCard from './ImageCard';
 import EditModal from './EditModal';
 import ViewKeysModal from './ViewKeysModal';
@@ -21,6 +21,24 @@ const MODELS = {
     'openai-dalle2': { provider: 'openai', name: 'OpenAI - DALL·E 2' },
 };
 
+type SafetyLevel = 'default' | 'lenient' | 'none';
+
+const SAFETY_SETTINGS_CONFIG: Record<Exclude<SafetyLevel, 'default'>, Array<{category: HarmCategory, threshold: HarmBlockThreshold}>> = {
+  lenient: [
+    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+  ],
+  none: [
+    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  ]
+};
+
+
 const maskKey = (key: string) => {
     if (!key || key.length <= 8) return '****';
     return `${key.substring(0, 4)}...${key.substring(key.length - 4)}`;
@@ -37,6 +55,7 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
     const [concurrencyLimit, setConcurrencyLimit] = useState(1);
     const [requestDelay, setRequestDelay] = useState(1000);
     const [isViewKeysModalOpen, setIsViewKeysModalOpen] = useState(false);
+    const [safetyLevel, setSafetyLevel] = useState<SafetyLevel>('none');
     
     const [startId, setStartId] = useState<string>('');
     const [endId, setEndId] = useState<string>('');
@@ -178,10 +197,21 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
             if (currentProvider === 'google') {
                 const ai = googleInstances[keyIndexToTry];
                  if (!ai) throw new Error("Google AI instance not found");
+
+                const config: any = {
+                    numberOfImages: 1,
+                    outputMimeType: 'image/jpeg',
+                    aspectRatio,
+                };
+
+                if (safetyLevel !== 'default') {
+                    config.safetySettings = SAFETY_SETTINGS_CONFIG[safetyLevel];
+                }
+
                 const response = await ai.models.generateImages({
                     model: 'imagen-4.0-generate-001',
                     prompt: resultToGenerate.prompt,
-                    config: { numberOfImages: 1, outputMimeType: 'image/jpeg', aspectRatio },
+                    config,
                 });
                 
                 const firstResult = response.generatedImages?.[0];
@@ -248,7 +278,7 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
             const errorMessage = handleError(error, currentProvider);
             return { ...resultToGenerate, status: 'error', error: errorMessage };
         }
-    }, [selectedModel, apiKeys, aspectRatio, isManualKeySelection, activeKeyIndices, googleInstances]);
+    }, [selectedModel, apiKeys, aspectRatio, isManualKeySelection, activeKeyIndices, googleInstances, safetyLevel]);
 
     const handleStartGeneration = async () => {
         if (prompts.length === 0) return alert("Please upload a valid CSV file or paste data first.");
@@ -493,6 +523,24 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
                                 <div className="flex flex-col gap-2">
                                     <label htmlFor="delay" className="flex items-center gap-2 text-sm"><ClockIcon className="w-5 h-5" /> Request Delay: <span className="font-bold">{(requestDelay / 1000).toFixed(1)}s</span></label>
                                     <input id="delay" type="range" min="0" max="5000" step="100" value={requestDelay} onChange={(e) => setRequestDelay(Number(e.target.value))} disabled={isGenerating} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-indigo-600" />
+                                </div>
+                                <div className="flex flex-col gap-2 md:col-span-2">
+                                    <label htmlFor="safety" className="flex items-center gap-2 text-sm"><ShieldIcon className="w-5 h-5" /> Safety Filtering (Google AI only)</label>
+                                    <select 
+                                        id="safety" 
+                                        value={safetyLevel} 
+                                        onChange={(e) => setSafetyLevel(e.target.value as SafetyLevel)}
+                                        disabled={isGenerating || MODELS[selectedModel].provider !== 'google'} 
+                                        className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        title={MODELS[selectedModel].provider !== 'google' ? 'This setting is only available for Google AI models.' : ''}
+                                    >
+                                        <option value="default">Standard (Default)</option>
+                                        <option value="lenient">Lenient</option>
+                                        <option value="none">Permissive (Block None)</option>
+                                    </select>
+                                    {safetyLevel === 'none' && MODELS[selectedModel].provider === 'google' && (
+                                        <p className="text-xs text-yellow-400 mt-1">Warning: This may generate sensitive content. Use responsibly.</p>
+                                    )}
                                 </div>
                             </div>
                         </div>
