@@ -217,10 +217,10 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
                 const firstResult = response.generatedImages?.[0];
 
                 if (!firstResult?.image?.imageBytes) {
-                    let errorMessage = 'Generation failed: No image returned from API. This may be due to safety filters.';
+                    let errorMessage = 'No image was returned from the API. This is often caused by safety filters. Try rewriting the prompt.';
                      if (firstResult?.safetyFeedback) {
                         const reasons = firstResult.safetyFeedback.reasons?.map(r => r.reason).join(', ');
-                        errorMessage = `Image blocked by safety filters.${reasons ? ` Reasons: ${reasons}` : ''}`;
+                        errorMessage = `Image blocked by safety filters. ${reasons ? `Reasons: ${reasons}. ` : ''}Please try modifying your prompt.`;
                     }
                     throw new Error(errorMessage);
                 }

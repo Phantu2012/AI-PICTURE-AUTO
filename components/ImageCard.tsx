@@ -52,7 +52,7 @@ const ImageCard: React.FC<ImageCardProps> = ({ result, onRetry, onEdit }) => {
                     <div className="flex flex-col items-center justify-center h-full p-4 text-center">
                         <ErrorIcon className="w-10 h-10 text-red-400 mb-2" />
                         <p className="text-sm font-semibold text-red-400">Generation Failed</p>
-                        <p className="text-xs text-gray-400 mt-1 line-clamp-2" title={error}>{error}</p>
+                        <p className="text-xs text-gray-400 mt-1 line-clamp-4" title={error}>{error}</p>
                         <div className="mt-4 flex gap-2">
                              <button onClick={() => onRetry(id)} title="Retry" className="p-2 bg-gray-600 rounded-full text-white hover:bg-indigo-600 transition-colors">
                                 <RetryIcon className="w-4 h-4" />
