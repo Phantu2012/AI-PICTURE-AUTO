@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
-import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from '@google/genai';
+import { GoogleGenAI, HarmCategory, HarmBlockThreshold, Modality } from '@google/genai';
 import Papa from 'papaparse';
 import JSZip from 'jszip';
 import { AspectRatio, CsvRow, ImageResult, ApiKeys, Provider } from '../types';
@@ -16,7 +16,7 @@ interface ImageGeneratorProps {
 }
 
 const MODELS = {
-    'google-imagen': { provider: 'google', name: 'Google - Imagen 4' },
+    'google-imagen': { provider: 'google', name: 'Google - Gemini Flash Image' },
     'openai-dalle3': { provider: 'openai', name: 'OpenAI - DALL·E 3' },
     'openai-dalle2': { provider: 'openai', name: 'OpenAI - DALL·E 2' },
 };
@@ -198,34 +198,41 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
                 const ai = googleInstances[keyIndexToTry];
                  if (!ai) throw new Error("Google AI instance not found");
 
-                const config: any = {
-                    numberOfImages: 1,
-                    outputMimeType: 'image/jpeg',
-                    aspectRatio,
-                };
-
-                // The safetySettings parameter appears to be unsupported by the generateImages endpoint
-                // and may cause silent failures. Relying on the API's default filtering.
+                const safetySettings = safetyLevel === 'default' ? undefined : SAFETY_SETTINGS_CONFIG[safetyLevel];
                 
-                const response = await ai.models.generateImages({
-                    model: 'imagen-4.0-generate-001',
-                    prompt: resultToGenerate.prompt,
-                    config,
+                const promptWithAspectRatio = `${resultToGenerate.prompt}, aspect ratio ${aspectRatio}`;
+
+                const response = await ai.models.generateContent({
+                    model: 'gemini-2.5-flash-image',
+                    contents: { parts: [{ text: promptWithAspectRatio }] },
+                    config: {
+                      responseModalities: [Modality.IMAGE],
+                    },
+                    safetySettings,
                 });
                 
-                const firstResult = response.generatedImages?.[0];
-
-                if (!firstResult?.image?.imageBytes) {
+                let base64ImageBytes: string | undefined;
+                if (response.candidates && response.candidates.length > 0) {
+                    for (const part of response.candidates[0].content.parts) {
+                        if (part.inlineData) {
+                            base64ImageBytes = part.inlineData.data;
+                            break;
+                        }
+                    }
+                }
+                
+                if (!base64ImageBytes) {
                     let errorMessage = 'No image was returned from the API. This is often caused by safety filters. Try rewriting the prompt.';
-                     if (firstResult?.safetyFeedback) {
-                        const reasons = firstResult.safetyFeedback.reasons?.map(r => r.reason).join(', ');
-                        errorMessage = `Image blocked by safety filters. ${reasons ? `Reasons: ${reasons}. ` : ''}Please try modifying your prompt.`;
+                    const blockReason = response.candidates?.[0]?.finishReason;
+                    const safetyRatings = response.candidates?.[0]?.safetyRatings;
+
+                    if (blockReason === 'SAFETY' || (safetyRatings && safetyRatings.some(r => r.blocked === true))) {
+                        errorMessage = `Image generation blocked due to safety concerns. Reason: ${blockReason}. Please adjust the prompt or safety settings.`;
                     }
                     throw new Error(errorMessage);
                 }
                 
-                const base64ImageBytes = firstResult.image.imageBytes;
-                imageUrl = `data:image/jpeg;base64,${base64ImageBytes}`;
+                imageUrl = `data:image/png;base64,${base64ImageBytes}`;
             } else { // OpenAI
                 const apiKey = keysForProvider[keyIndexToTry];
                 const model = selectedModel === 'openai-dalle3' ? 'dall-e-3' : 'dall-e-2';
@@ -439,14 +446,16 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
                             <h3 className="font-semibold text-lg text-white">2. Aspect Ratio</h3>
                             <div className="flex gap-2">
                                 {(Object.values(AspectRatio) as Array<AspectRatio>).map(ratio => {
-                                    const isSupported = !(selectedModel === 'openai-dalle2' && ratio !== '1:1');
+                                    const isDalle2 = selectedModel === 'openai-dalle2';
+                                    const isUnsupported = isDalle2 && ratio !== '1:1';
+                                    const title = isDalle2 ? 'DALL·E 2 only supports 1:1 ratio' : '';
                                     return (
                                         <button
                                             key={ratio}
                                             onClick={() => setAspectRatio(ratio)}
-                                            disabled={isGenerating || !isSupported}
+                                            disabled={isGenerating || isUnsupported}
                                             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors w-full ${aspectRatio === ratio ? 'bg-indigo-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'} disabled:opacity-50 disabled:cursor-not-allowed`}
-                                            title={!isSupported ? `DALL·E 2 only supports 1:1 ratio` : ''}
+                                            title={isUnsupported ? title : ''}
                                         >
                                             {ratio}
                                         </button>
@@ -529,17 +538,14 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
                                         id="safety" 
                                         value={safetyLevel} 
                                         onChange={(e) => setSafetyLevel(e.target.value as SafetyLevel)}
-                                        disabled={isGenerating || MODELS[selectedModel].provider === 'google'} 
+                                        disabled={isGenerating || MODELS[selectedModel].provider !== 'google'} 
                                         className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        title={MODELS[selectedModel].provider === 'google' ? 'Custom safety settings are not supported for the Imagen model.' : 'This setting is only available for Google AI models.'}
+                                        title={MODELS[selectedModel].provider !== 'google' ? 'This setting is only available for Google AI models.' : ''}
                                     >
                                         <option value="default">Standard (Default)</option>
                                         <option value="lenient">Lenient</option>
                                         <option value="none">Permissive (Block None)</option>
                                     </select>
-                                    {MODELS[selectedModel].provider === 'google' && (
-                                        <p className="text-xs text-yellow-400 mt-1">Note: The Imagen model uses default safety filtering. This control has no effect.</p>
-                                    )}
                                 </div>
                             </div>
                         </div>
