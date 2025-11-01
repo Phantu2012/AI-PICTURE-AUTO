@@ -204,10 +204,9 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
                     aspectRatio,
                 };
 
-                if (safetyLevel !== 'default') {
-                    config.safetySettings = SAFETY_SETTINGS_CONFIG[safetyLevel];
-                }
-
+                // The safetySettings parameter appears to be unsupported by the generateImages endpoint
+                // and may cause silent failures. Relying on the API's default filtering.
+                
                 const response = await ai.models.generateImages({
                     model: 'imagen-4.0-generate-001',
                     prompt: resultToGenerate.prompt,
@@ -530,16 +529,16 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
                                         id="safety" 
                                         value={safetyLevel} 
                                         onChange={(e) => setSafetyLevel(e.target.value as SafetyLevel)}
-                                        disabled={isGenerating || MODELS[selectedModel].provider !== 'google'} 
+                                        disabled={isGenerating || MODELS[selectedModel].provider === 'google'} 
                                         className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        title={MODELS[selectedModel].provider !== 'google' ? 'This setting is only available for Google AI models.' : ''}
+                                        title={MODELS[selectedModel].provider === 'google' ? 'Custom safety settings are not supported for the Imagen model.' : 'This setting is only available for Google AI models.'}
                                     >
                                         <option value="default">Standard (Default)</option>
                                         <option value="lenient">Lenient</option>
                                         <option value="none">Permissive (Block None)</option>
                                     </select>
-                                    {safetyLevel === 'none' && MODELS[selectedModel].provider === 'google' && (
-                                        <p className="text-xs text-yellow-400 mt-1">Warning: This may generate sensitive content. Use responsibly.</p>
+                                    {MODELS[selectedModel].provider === 'google' && (
+                                        <p className="text-xs text-yellow-400 mt-1">Note: The Imagen model uses default safety filtering. This control has no effect.</p>
                                     )}
                                 </div>
                             </div>
