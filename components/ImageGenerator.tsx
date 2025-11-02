@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
-import { GoogleGenAI, HarmCategory, HarmBlockThreshold, Modality } from '@google/genai';
+import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from '@google/genai';
 import Papa from 'papaparse';
 import JSZip from 'jszip';
 import { AspectRatio, CsvRow, ImageResult, ApiKeys, Provider } from '../types';
@@ -16,7 +16,7 @@ interface ImageGeneratorProps {
 }
 
 const MODELS = {
-    'google-imagen': { provider: 'google', name: 'Google - Gemini Flash Image' },
+    'google-imagen-4': { provider: 'google', name: 'Google - Imagen 4' },
     'openai-dalle3': { provider: 'openai', name: 'OpenAI - DALL·E 3' },
     'openai-dalle2': { provider: 'openai', name: 'OpenAI - DALL·E 2' },
 };
@@ -60,7 +60,7 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
     const [startId, setStartId] = useState<string>('');
     const [endId, setEndId] = useState<string>('');
     
-    const [selectedModel, setSelectedModel] = useState<keyof typeof MODELS>('google-imagen');
+    const [selectedModel, setSelectedModel] = useState<keyof typeof MODELS>('google-imagen-4');
     const [activeKeyIndices, setActiveKeyIndices] = useState({ google: 0, openai: 0 });
     const [isManualKeySelection, setIsManualKeySelection] = useState(false);
 
@@ -196,43 +196,29 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
             let imageUrl: string;
             if (currentProvider === 'google') {
                 const ai = googleInstances[keyIndexToTry];
-                 if (!ai) throw new Error("Google AI instance not found");
+                if (!ai) throw new Error("Google AI instance not found");
 
                 const safetySettings = safetyLevel === 'default' ? undefined : SAFETY_SETTINGS_CONFIG[safetyLevel];
                 
-                const promptWithAspectRatio = `${resultToGenerate.prompt}, aspect ratio ${aspectRatio}`;
-
-                const response = await ai.models.generateContent({
-                    model: 'gemini-2.5-flash-image',
-                    contents: { parts: [{ text: promptWithAspectRatio }] },
+                const response = await ai.models.generateImages({
+                    model: 'imagen-4.0-generate-001',
+                    prompt: resultToGenerate.prompt,
                     config: {
-                      responseModalities: [Modality.IMAGE],
+                      numberOfImages: 1,
+                      outputMimeType: 'image/jpeg',
+                      aspectRatio: aspectRatio,
                     },
                     safetySettings,
                 });
                 
-                let base64ImageBytes: string | undefined;
-                if (response.candidates && response.candidates.length > 0) {
-                    for (const part of response.candidates[0].content.parts) {
-                        if (part.inlineData) {
-                            base64ImageBytes = part.inlineData.data;
-                            break;
-                        }
-                    }
-                }
+                const base64ImageBytes: string | undefined = response.generatedImages?.[0]?.image?.imageBytes;
                 
                 if (!base64ImageBytes) {
                     let errorMessage = 'No image was returned from the API. This is often caused by safety filters. Try rewriting the prompt.';
-                    const blockReason = response.candidates?.[0]?.finishReason;
-                    const safetyRatings = response.candidates?.[0]?.safetyRatings;
-
-                    if (blockReason === 'SAFETY' || (safetyRatings && safetyRatings.some(r => r.blocked === true))) {
-                        errorMessage = `Image generation blocked due to safety concerns. Reason: ${blockReason}. Please adjust the prompt or safety settings.`;
-                    }
                     throw new Error(errorMessage);
                 }
                 
-                imageUrl = `data:image/png;base64,${base64ImageBytes}`;
+                imageUrl = `data:image/jpeg;base64,${base64ImageBytes}`;
             } else { // OpenAI
                 const apiKey = keysForProvider[keyIndexToTry];
                 const model = selectedModel === 'openai-dalle3' ? 'dall-e-3' : 'dall-e-2';
