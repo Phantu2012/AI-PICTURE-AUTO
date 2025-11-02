@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
-import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from '@google/genai';
+import { GoogleGenAI, HarmCategory, HarmBlockThreshold, Modality } from '@google/genai';
 import Papa from 'papaparse';
 import JSZip from 'jszip';
 import { AspectRatio, CsvRow, ImageResult, ApiKeys, Provider } from '../types';
@@ -16,8 +16,9 @@ interface ImageGeneratorProps {
 }
 
 const MODELS = {
-    'google-imagen-4': { provider: 'google', name: 'Google - Imagen 4' },
     'openai-dalle3': { provider: 'openai', name: 'OpenAI - DALL·E 3' },
+    'google-imagen-4': { provider: 'google', name: 'Google - Imagen 4' },
+    'google-gemini-flash-image': { provider: 'google', name: 'Google - Gemini Flash Image' },
     'openai-dalle2': { provider: 'openai', name: 'OpenAI - DALL·E 2' },
 };
 
@@ -60,7 +61,7 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
     const [startId, setStartId] = useState<string>('');
     const [endId, setEndId] = useState<string>('');
     
-    const [selectedModel, setSelectedModel] = useState<keyof typeof MODELS>('google-imagen-4');
+    const [selectedModel, setSelectedModel] = useState<keyof typeof MODELS>('openai-dalle3');
     const [activeKeyIndices, setActiveKeyIndices] = useState({ google: 0, openai: 0 });
     const [isManualKeySelection, setIsManualKeySelection] = useState(false);
 
@@ -77,7 +78,7 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
 
     useEffect(() => {
         // Reset aspect ratio if not supported by the new model
-        if (selectedModel === 'openai-dalle2' && aspectRatio !== AspectRatio.SQUARE) {
+        if ((selectedModel === 'openai-dalle2' || selectedModel === 'google-gemini-flash-image') && aspectRatio !== AspectRatio.SQUARE) {
             setAspectRatio(AspectRatio.SQUARE);
         }
     }, [selectedModel, aspectRatio]);
@@ -200,25 +201,49 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
 
                 const safetySettings = safetyLevel === 'default' ? undefined : SAFETY_SETTINGS_CONFIG[safetyLevel];
                 
-                const response = await ai.models.generateImages({
-                    model: 'imagen-4.0-generate-001',
-                    prompt: resultToGenerate.prompt,
-                    config: {
-                      numberOfImages: 1,
-                      outputMimeType: 'image/jpeg',
-                      aspectRatio: aspectRatio,
-                    },
-                    safetySettings,
-                });
-                
-                const base64ImageBytes: string | undefined = response.generatedImages?.[0]?.image?.imageBytes;
-                
-                if (!base64ImageBytes) {
-                    let errorMessage = 'No image was returned from the API. This is often caused by safety filters. Try rewriting the prompt.';
-                    throw new Error(errorMessage);
+                if (selectedModel === 'google-imagen-4') {
+                    const response = await ai.models.generateImages({
+                        model: 'imagen-4.0-generate-001',
+                        prompt: resultToGenerate.prompt,
+                        config: {
+                          numberOfImages: 1,
+                          outputMimeType: 'image/jpeg',
+                          aspectRatio: aspectRatio,
+                        },
+                        safetySettings,
+                    });
+                    
+                    const base64ImageBytes: string | undefined = response.generatedImages?.[0]?.image?.imageBytes;
+                    
+                    if (!base64ImageBytes) {
+                        let errorMessage = 'No image was returned from the API. This is often caused by safety filters. Try rewriting the prompt.';
+                        throw new Error(errorMessage);
+                    }
+                    
+                    imageUrl = `data:image/jpeg;base64,${base64ImageBytes}`;
+                } else if (selectedModel === 'google-gemini-flash-image') {
+                    const response = await ai.models.generateContent({
+                        model: 'gemini-2.5-flash-image',
+                        contents: {
+                            parts: [{ text: resultToGenerate.prompt }],
+                        },
+                        config: {
+                            responseModalities: [Modality.IMAGE],
+                        },
+                        safetySettings,
+                    });
+        
+                    const part = response.candidates?.[0]?.content?.parts?.find(p => !!p.inlineData);
+                    const base64ImageBytes = part?.inlineData?.data;
+        
+                    if (!base64ImageBytes) {
+                        let errorMessage = 'No image was returned from the API. This is often caused by safety filters. Try rewriting the prompt.';
+                        throw new Error(errorMessage);
+                    }
+                    imageUrl = `data:image/png;base64,${base64ImageBytes}`;
+                } else {
+                     throw new Error(`Unsupported Google model: ${selectedModel}`);
                 }
-                
-                imageUrl = `data:image/jpeg;base64,${base64ImageBytes}`;
             } else { // OpenAI
                 const apiKey = keysForProvider[keyIndexToTry];
                 const model = selectedModel === 'openai-dalle3' ? 'dall-e-3' : 'dall-e-2';
@@ -432,16 +457,16 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
                             <h3 className="font-semibold text-lg text-white">2. Aspect Ratio</h3>
                             <div className="flex gap-2">
                                 {(Object.values(AspectRatio) as Array<AspectRatio>).map(ratio => {
-                                    const isDalle2 = selectedModel === 'openai-dalle2';
-                                    const isUnsupported = isDalle2 && ratio !== '1:1';
-                                    const title = isDalle2 ? 'DALL·E 2 only supports 1:1 ratio' : '';
+                                    const isUnsupportedModel = selectedModel === 'openai-dalle2' || selectedModel === 'google-gemini-flash-image';
+                                    const isUnsupported = isUnsupportedModel && ratio !== '1:1';
+                                    const title = isUnsupported ? 'This model only supports 1:1 ratio' : '';
                                     return (
                                         <button
                                             key={ratio}
                                             onClick={() => setAspectRatio(ratio)}
                                             disabled={isGenerating || isUnsupported}
                                             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors w-full ${aspectRatio === ratio ? 'bg-indigo-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'} disabled:opacity-50 disabled:cursor-not-allowed`}
-                                            title={isUnsupported ? title : ''}
+                                            title={title}
                                         >
                                             {ratio}
                                         </button>
