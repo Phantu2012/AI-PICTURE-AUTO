@@ -3,7 +3,7 @@ import { GoogleGenAI, HarmCategory, HarmBlockThreshold, Modality } from '@google
 import Papa from 'papaparse';
 import JSZip from 'jszip';
 import { AspectRatio, CsvRow, ImageResult, ApiKeys, Provider } from '../types';
-import { UploadIcon, GenerateIcon, DownloadIcon, KeyIcon, TuneIcon, ClockIcon, ShieldIcon } from './icons';
+import { UploadIcon, GenerateIcon, DownloadIcon, KeyIcon, TuneIcon, ClockIcon, ShieldIcon, AnonymizeIcon } from './icons';
 import ImageCard from './ImageCard';
 import EditModal from './EditModal';
 import ViewKeysModal from './ViewKeysModal';
@@ -64,6 +64,7 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
     const [selectedModel, setSelectedModel] = useState<keyof typeof MODELS>('openai-dalle3');
     const [activeKeyIndices, setActiveKeyIndices] = useState({ google: 0, openai: 0 });
     const [isManualKeySelection, setIsManualKeySelection] = useState(false);
+    const [anonymizePrompts, setAnonymizePrompts] = useState(true);
 
     const [inputMode, setInputMode] = useState<'csv' | 'text'>('csv');
     const [textInput, setTextInput] = useState('');
@@ -148,6 +149,49 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
         });
     };
     
+    const anonymizePrompt = async (prompt: string, aiInstance: GoogleGenAI): Promise<string> => {
+        if (!aiInstance) return prompt;
+    
+        try {
+            const systemInstruction = `You are a prompt sanitization expert. Your task is to identify names of real, famous people (celebrities, politicians, historical figures, etc.) in the user's prompt and replace them with a generic, non-famous, fictional first name (like Alex, Jordan, Casey).
+- Replace each unique famous name consistently with the same fictional name.
+- Do not change any other part of the prompt.
+- If no famous names are found, return the original prompt.
+- Your output must be ONLY the modified (or original) prompt as a single line of text, with no extra formatting, explanation, or labels.
+
+Example 1:
+User: "A photo of Barack Obama playing basketball."
+You: "A photo of Alex playing basketball."
+
+Example 2:
+User: "Impressionist painting of a cat sleeping on a windowsill."
+You: "Impressionist painting of a cat sleeping on a windowsill."
+
+Example 3:
+User: "Taylor Swift and Travis Kelce on a date at a pizzeria."
+You: "Jordan and Casey on a date at a pizzeria."`;
+
+            const response = await aiInstance.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: prompt,
+                config: {
+                    systemInstruction: systemInstruction,
+                    temperature: 0.2,
+                },
+            });
+    
+            const anonymizedText = response.text.trim();
+            if (anonymizedText) {
+                console.log(`Anonymized prompt: "${prompt}" -> "${anonymizedText}"`);
+                return anonymizedText;
+            }
+            return prompt;
+        } catch (error) {
+            console.error("Prompt anonymization failed:", error);
+            return prompt; // Fallback to original prompt on error
+        }
+    };
+
     const generateSingleImage = useCallback(async (
         resultToGenerate: ImageResult,
         attempt = 0
@@ -156,6 +200,14 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
         const keysForProvider = apiKeys[currentProvider];
         if (keysForProvider.length === 0) {
             return { ...resultToGenerate, status: 'error', error: `No API keys provided for ${currentProvider}.` };
+        }
+
+        let promptForApi = resultToGenerate.prompt;
+        if (anonymizePrompts && apiKeys.google.length > 0) {
+            const googleAiInstance = googleInstances[googleKeyIndex.current];
+            if (googleAiInstance) {
+                promptForApi = await anonymizePrompt(promptForApi, googleAiInstance);
+            }
         }
 
         const handleError = (error: any, provider: Provider): string => {
@@ -204,7 +256,7 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
                 if (selectedModel === 'google-imagen-4') {
                     const response = await ai.models.generateImages({
                         model: 'imagen-4.0-generate-001',
-                        prompt: resultToGenerate.prompt,
+                        prompt: promptForApi,
                         config: {
                           numberOfImages: 1,
                           outputMimeType: 'image/jpeg',
@@ -225,7 +277,7 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
                     const response = await ai.models.generateContent({
                         model: 'gemini-2.5-flash-image',
                         contents: {
-                            parts: [{ text: resultToGenerate.prompt }],
+                            parts: [{ text: promptForApi }],
                         },
                         config: {
                             responseModalities: [Modality.IMAGE],
@@ -256,7 +308,7 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
                     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         model,
-                        prompt: resultToGenerate.prompt,
+                        prompt: promptForApi,
                         n: 1,
                         size,
                         response_format: 'b64_json',
@@ -295,7 +347,7 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
             const errorMessage = handleError(error, currentProvider);
             return { ...resultToGenerate, status: 'error', error: errorMessage };
         }
-    }, [selectedModel, apiKeys, aspectRatio, isManualKeySelection, activeKeyIndices, googleInstances, safetyLevel]);
+    }, [selectedModel, apiKeys, aspectRatio, isManualKeySelection, activeKeyIndices, googleInstances, safetyLevel, anonymizePrompts]);
 
     const handleStartGeneration = async () => {
         if (prompts.length === 0) return alert("Please upload a valid CSV file or paste data first.");
@@ -543,8 +595,8 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
                                     <label htmlFor="delay" className="flex items-center gap-2 text-sm"><ClockIcon className="w-5 h-5" /> Request Delay: <span className="font-bold">{(requestDelay / 1000).toFixed(1)}s</span></label>
                                     <input id="delay" type="range" min="0" max="5000" step="100" value={requestDelay} onChange={(e) => setRequestDelay(Number(e.target.value))} disabled={isGenerating} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-indigo-600" />
                                 </div>
-                                <div className="flex flex-col gap-2 md:col-span-2">
-                                    <label htmlFor="safety" className="flex items-center gap-2 text-sm"><ShieldIcon className="w-5 h-5" /> Safety Filtering (Google AI only)</label>
+                                <div className="flex flex-col gap-2">
+                                    <label htmlFor="safety" className="flex items-center gap-2 text-sm"><ShieldIcon className="w-5 h-5" /> Safety Filtering (Google AI)</label>
                                     <select 
                                         id="safety" 
                                         value={safetyLevel} 
@@ -557,6 +609,32 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ apiKeys, onClearAllKeys
                                         <option value="lenient">Lenient</option>
                                         <option value="none">Permissive (Block None)</option>
                                     </select>
+                                </div>
+                                <div className="flex flex-col gap-2">
+                                    <label className="flex items-center gap-2 text-sm"><AnonymizeIcon className="w-5 h-5" /> Anonymize Prompts</label>
+                                    <div className="flex items-center">
+                                        <button
+                                            type="button"
+                                            className={`${
+                                                anonymizePrompts ? 'bg-indigo-600' : 'bg-gray-600'
+                                            } relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-800 disabled:opacity-50 disabled:cursor-not-allowed`}
+                                            role="switch"
+                                            aria-checked={anonymizePrompts}
+                                            onClick={() => setAnonymizePrompts(!anonymizePrompts)}
+                                            disabled={isGenerating || apiKeys.google.length === 0}
+                                            title={apiKeys.google.length === 0 ? "Requires a Google AI key to be added." : "Automatically replaces names of famous people with generic names to improve safety compliance."}
+                                        >
+                                            <span
+                                                aria-hidden="true"
+                                                className={`${
+                                                    anonymizePrompts ? 'translate-x-5' : 'translate-x-0'
+                                                } pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}
+                                            />
+                                        </button>
+                                        <span className="ml-3 text-xs text-gray-400">
+                                            {apiKeys.google.length === 0 ? "Requires Google AI Key" : (anonymizePrompts ? "Enabled" : "Disabled")}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
