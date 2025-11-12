@@ -8,6 +8,10 @@ This contains everything you need to run your app locally.
 
 View your app in AI Studio: https://ai.studio/apps/drive/1MTfHuXoUT3GMcyVKOF5P59Hzeiv4ZIFR
 
+## Product Design Documentation
+
+- [VOXIS: The Personal Voice Lab — Sandbox Technical Specification](docs/VOXIS-SANDBOX-SPEC.md)
+
 ## Run Locally
 
 **Prerequisites:**  Node.js
